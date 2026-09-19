@@ -29,10 +29,10 @@ function initMap(center = [19.0680, 72.8800], zoom = 14.5) {
   // Position zoom controls top-left
   L.control.zoom({ position: 'topleft' }).addTo(map);
 
-  // Modern Dark Basemap (CartoDB Dark Matter)
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-    maxZoom: 19,
-    subdomains: 'abcd'
+  // Google Maps Standard API Basemap
+  L.tileLayer('https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
+    maxZoom: 20,
+    attribution: '&copy; Google Maps'
   }).addTo(map);
 
   // Add layer groups to map
