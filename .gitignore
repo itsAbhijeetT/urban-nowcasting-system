@@ -1,5 +1,29 @@
-.venv/
+# Python
 __pycache__/
-.dist/
-.kilo/
-project 1/
+*.py[cod]
+*$py.class
+*.so
+
+# Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
