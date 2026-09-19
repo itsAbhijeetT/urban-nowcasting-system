@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HYDRO-NOWCAST | Urban Flood Nowcasting System (MoES / NCMRWF)</title>
+  
+  <!-- Modern Typography: Inter & Outfit -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  
+  <!-- Application CSS -->
+  <link rel="stylesheet" href="css/style.css">
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Chart.js for Hyetographs & Depth Profiles -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="dark-theme">
+  <!-- Top Navigation / Command Bar -->
+  <header class="top-bar">
+    <div class="brand-container">
+      <div class="brand-logo">
+        <i data-lucide="waves" class="logo-icon pulse-blue"></i>
+      </div>
+      <div class="brand-text">
+        <h1>HYDRO-NOWCAST <span class="badge-sih">SIH 2026 | MoES - NCMRWF</span></h1>
+        <p class="subtitle">Coupled Drainage–Rainfall Urban Flood Nowcasting & Emergency Routing Platform</p>
+      </div>
+    </div>
+
+    <!-- Live Status HUD -->
+    <div class="system-status-hud">
+      <div class="status-indicator active">
+        <span class="pulse-dot green"></span>
+        <span class="label">IMD DWR Radar: <strong id="radarStatus">LIVE (Santacruz 250m)</strong></span>
+      </div>
+      <div class="status-indicator">
+        <span class="pulse-dot blue"></span>
+        <span class="label">Coupling: <strong>2-Way 1D/2D Engine</strong></span>
+      </div>
+      <div class="status-indicator">
+        <i data-lucide="map-pin" class="status-mini-icon"></i>
+        <span class="label">Ward: <strong>Kurla-Sion Pilot Basin</strong></span>
+      </div>
+    </div>
+
+    <!-- Scenario Switcher -->
+    <div class="top-actions">
+      <div class="scenario-selector-wrap">
+        <label for="scenarioSelect"><i data-lucide="cloud-rain"></i> Event Scenario:</label>
+        <select id="scenarioSelect" class="styled-select">
+          <option value="cloudburst" selected>Cloudburst Deluge (105 mm/h peak)</option>
+          <option value="severe_monsoon">Severe Monsoon Squall (65 mm/h peak)</option>
+          <option value="moderate_shower">Moderate Shower (32 mm/h peak)</option>
+        </select>
+      </div>
+      <button id="triggerNowcastBtn" class="btn btn-primary" title="Re-run coupled nowcasting loop">
+        <i data-lucide="refresh-cw" id="refreshIcon"></i> Run Nowcast
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Workspace Layout -->
+  <main class="workspace-layout">
+    <!-- Map Viewport -->
+    <section class="map-section">
+      <div id="map" class="main-map"></div>
+
+      <!-- Map Layer Controls Overlay (Top Right) -->
+      <div class="map-overlay-card layer-toggles-card">
+        <div class="card-header-compact">
+          <i data-lucide="layers"></i> Layer Visibilities
+        </div>
+        <div class="layer-options">
+          <label class="toggle-switch">
+            <input type="checkbox" id="layerRadar" checked>
+            <span class="toggle-slider"></span>
+            <span class="toggle-label"><span class="layer-dot radar-color"></span> Doppler Radar (dBZ)</span>
+          </label>
+          <label class="toggle-switch">
+            <input type="checkbox" id="layerFlood" checked>
+            <span class="toggle-slider"></span>
+            <span class="toggle-label"><span class="layer-dot flood-color"></span> 2D Flood Inundation</span>
+          </label>
+          <label class="toggle-switch">
+            <input type="checkbox" id="layerDrainage" checked>
+            <span class="toggle-slider"></span>
+            <span class="toggle-label"><span class="layer-dot drain-color"></span> 1D Drainage Network</span>
+          </label>
+          <label class="toggle-switch">
+            <input type="checkbox" id="layerSurcharge" checked>
+            <span class="toggle-slider"></span>
+            <span class="toggle-label"><span class="layer-dot surcharge-color"></span> Surcharging Manholes</span>
+          </label>
+          <label class="toggle-switch">
+            <input type="checkbox" id="layerRoads" checked>
+            <span class="toggle-slider"></span>
+            <span class="toggle-label"><span class="layer-dot road-color"></span> Street Risk Levels</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Map Dynamic Legend (Bottom Left) -->
+      <div class="map-overlay-card legend-card">
+        <div class="legend-title">Hazard Depth Scale</div>
+        <div class="legend-items">
+          <div class="legend-item"><span class="swatch safe"></span> &lt; 10 cm (Passable / Safe)</div>
+          <div class="legend-item"><span class="swatch moderate"></span> 10–25 cm (Disruptive / Slow)</div>
+          <div class="legend-item"><span class="swatch severe"></span> 25–45 cm (Hazardous / Blocked)</div>
+          <div class="legend-item"><span class="swatch critical"></span> &gt; 45 cm (Severe Inundation)</div>
+          <div class="legend-item"><span class="swatch-ring pulse-surcharge"></span> Surcharging Backflow Point</div>
+        </div>
+      </div>
+
+      <!-- Bottom Floating Timeline & Scrubber Bar -->
+      <div class="timeline-scrubber-hud">
+        <div class="playback-controls">
+          <button id="playBtn" class="btn-icon" title="Play / Pause simulation loop">
+            <i data-lucide="play" id="playIcon"></i>
+          </button>
+          <button id="resetTimeBtn" class="btn-icon" title="Reset to T+0">
+            <i data-lucide="rotate-ccw"></i>
+          </button>
+        </div>
+
+        <div class="timeline-track-wrap">
+          <div class="timeline-meta">
+            <span class="timeline-current-lead">
+              Lead Time: <strong id="leadTimeDisplay">T+45 min</strong>
+            </span>
+            <span class="timeline-confidence">
+              Radar Extrapolation Skill: <strong id="confidenceDisplay">78.5%</strong>
+              <span class="confidence-bar"><span id="confidenceFill" style="width: 78.5%;"></span></span>
+            </span>
+          </div>
+
+          <div class="step-buttons" id="stepButtonsContainer">
+            <!-- Dynamically populated step buttons (T+0, T+15, ... T+180) -->
+          </div>
+        </div>
+
+        <div class="quick-telemetry">
+          <div class="telemetry-pill">
+            <span class="pill-label">Flooded Roads</span>
+            <span class="pill-value red" id="telemFloodedRoads">4 / 9</span>
+          </div>
+          <div class="telemetry-pill">
+            <span class="pill-label">Surcharge Backflow</span>
+            <span class="pill-value amber" id="telemSurchargeRate">1,240 L/s</span>
+          </div>
+          <div class="telemetry-pill">
+            <span class="pill-label">Max Depth</span>
+            <span class="pill-value red" id="telemMaxDepth">48.2 cm</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Side Intelligence Panel (Right) -->
+    <aside class="side-panel">
+      <!-- Panel Navigation Tabs -->
+      <nav class="panel-tabs">
+        <button class="tab-btn active" data-tab="nowcast">
+          <i data-lucide="activity"></i>
+          <span>Live Nowcast</span>
+        </button>
+        <button class="tab-btn" data-tab="routing">
+          <i data-lucide="navigation"></i>
+          <span>Safe Routing</span>
+        </button>
+        <button class="tab-btn" data-tab="backtest">
+          <i data-lucide="check-circle-2"></i>
+          <span>Validation</span>
+        </button>
+        <button class="tab-btn" data-tab="editor">
+          <i data-lucide="wrench"></i>
+          <span>ULB Drains</span>
+        </button>
+      </nav>
+
+      <!-- Tab Content 1: Live Nowcast -->
+      <div class="tab-content active" id="tab-nowcast">
+        <div class="panel-header">
+          <h2>Predictive Hydrology Overview</h2>
+          <span class="tag-live">Coupled 1D/2D Loop</span>
+        </div>
+
+        <!-- Telemetry Cards Grid -->
+        <div class="metric-cards-grid">
+          <div class="metric-card">
+            <span class="metric-title">Peak Rain Intensity</span>
+            <span class="metric-value blue" id="metricPeakRain">105.0 <small>mm/h</small></span>
+            <span class="metric-sub">Convective Core dBZ 58.0</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-title">Critical Chokepoints</span>
+            <span class="metric-value red" id="metricChokepoints">3 <small>streets</small></span>
+            <span class="metric-sub">&gt;25 cm waterlogging</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-title">Active Surcharge Nodes</span>
+            <span class="metric-value amber" id="metricSurchargeNodes">4 <small>manholes</small></span>
+            <span class="metric-sub">HGL &gt; Ground Elevation</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-title">Affected Population</span>
+            <span class="metric-value" id="metricPopulation">18,500</span>
+            <span class="metric-sub">Within 200m of inundation</span>
+          </div>
+        </div>
+
+        <!-- Hyetograph / Precipitation Chart -->
+        <div class="panel-card">
+          <div class="card-header">
+            <h3><i data-lucide="cloud-lightning"></i> Ward Hyetograph (0–180 min)</h3>
+            <span class="badge-sub">QPE vs Inundation</span>
+          </div>
+          <div class="chart-container">
+            <canvas id="hyetographChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Street Vulnerability List -->
+        <div class="panel-card">
+          <div class="card-header">
+            <h3><i data-lucide="alert-triangle"></i> Vulnerable Street Segments</h3>
+            <span class="badge-sub" id="vulnerableCount">4 Alerting</span>
+          </div>
+          <div class="vulnerable-list" id="vulnerableRoadsList">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab Content 2: Safe Routing -->
+      <div class="tab-content" id="tab-routing">
+        <div class="panel-header">
+          <h2>Flood-Safe Dynamic Navigation</h2>
+          <span class="tag-emergency">Module E Engine</span>
+        </div>
+        <p class="panel-desc">
+          Calculates dynamic A* routes over the city road network, penalizing edge weights in real time
+          based on predicted water depth and vehicle ground clearance.
+        </p>
+
+        <div class="routing-form">
+          <div class="form-group">
+            <label for="routeOrigin"><i data-lucide="map-pin"></i> Origin Point:</label>
+            <select id="routeOrigin" class="styled-select">
+              <option value="N_HOSPITAL" selected>Sion Hospital North Gate</option>
+              <option value="N_LBS">LBS Marg North Junction</option>
+              <option value="PARK_BLVD">Park Boulevard West</option>
+              <option value="EAST_RIDGE_N">East Ridge North</option>
+              <option value="RIVER_CANAL_W">Mithi Canal West</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="routeDestination"><i data-lucide="flag"></i> Destination:</label>
+            <select id="routeDestination" class="styled-select">
+              <option value="SOUTH_TERMINAL" selected>Kurla South Terminal</option>
+              <option value="STATION_WEST">Railway Station West Gate</option>
+              <option value="STATION_EAST">Station Approach East</option>
+              <option value="MARKET_HUB">Gandhi Market Center</option>
+              <option value="EAST_RIDGE_S">East Ridge South</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label><i data-lucide="truck"></i> Vehicle Clearance Mode:</label>
+            <div class="vehicle-toggle-group">
+              <label class="radio-pill">
+                <input type="radio" name="vehicleMode" value="emergency" checked>
+                <span><i data-lucide="shield-alert"></i> Emergency (35cm)</span>
+              </label>
+              <label class="radio-pill">
+                <input type="radio" name="vehicleMode" value="commuter">
+                <span><i data-lucide="car"></i> Civilian (15cm)</span>
+              </label>
+            </div>
+          </div>
+
+          <button id="calcRouteBtn" class="btn btn-accent btn-block">
+            <i data-lucide="compass"></i> Compute Flood-Safe Route
+          </button>
+        </div>
+
+        <!-- Route Comparison Results -->
+        <div id="routeResultsCard" class="panel-card routing-result-card" style="display: none;">
+          <div class="card-header">
+            <h3><i data-lucide="git-merge"></i> Route Comparison</h3>
+            <span id="routeStatusBadge" class="badge-success">Safe Route Active</span>
+          </div>
+          <div class="route-stats-grid">
+            <div class="stat-box">
+              <span class="stat-label">Safe Travel Time</span>
+              <span class="stat-val" id="routeTravelTime">8.5 min</span>
+            </div>
+            <div class="stat-box">
+              <span class="stat-label">Total Distance</span>
+              <span class="stat-val" id="routeDistance">2.4 km</span>
+            </div>
+            <div class="stat-box">
+              <span class="stat-label">Max Depth on Route</span>
+              <span class="stat-val green" id="routeMaxDepth">4.2 cm</span>
+            </div>
+            <div class="stat-box">
+              <span class="stat-label">Delay vs Dry Base</span>
+              <span class="stat-val" id="routeDelay">+1.8 min</span>
+            </div>
+          </div>
+          <div class="route-directions" id="routeDirectionsList"></div>
+        </div>
+      </div>
+
+      <!-- Tab Content 3: Historical Backtesting Validation -->
+      <div class="tab-content" id="tab-backtest">
+        <div class="panel-header">
+          <h2>Historical Flood Validation</h2>
+          <span class="tag-validation">Scientific Evaluation</span>
+        </div>
+        <p class="panel-desc">
+          Validates the coupled nowcasting model against verified ground-truth waterlogging logs 
+          from past extreme deluge events (e.g. BMC Disaster Management & CWC reports).
+        </p>
+
+        <div class="backtest-selector-card">
+          <label for="backtestEventSelect">Select Historical Benchmark:</label>
+          <select id="backtestEventSelect" class="styled-select">
+            <option value="mumbai_2005" selected>Mumbai Cloudburst Deluge (26-July Incident Replay)</option>
+            <option value="chennai_2015">Chennai Urban Micro-Burst (December 2015 Analogue)</option>
+          </select>
+          <button id="runBacktestBtn" class="btn btn-primary btn-block" style="margin-top: 10px;">
+            <i data-lucide="play-circle"></i> Run Backtest Evaluation
+          </button>
+        </div>
+
+        <!-- Scientific Metrics Scorecard -->
+        <div class="panel-card">
+          <div class="card-header">
+            <h3><i data-lucide="award"></i> Verification Metrics (CWC Standard)</h3>
+          </div>
+          <div class="metrics-scorecard">
+            <div class="score-item">
+              <span class="score-title">Critical Success Index (CSI)</span>
+              <span class="score-value highlight" id="csiMetric">0.833</span>
+              <span class="score-hint">Threat Score (Ideal = 1.0)</span>
+            </div>
+            <div class="score-item">
+              <span class="score-title">Probability of Detection (POD)</span>
+              <span class="score-value" id="podMetric">1.000</span>
+              <span class="score-hint">Sensitivity / Recall</span>
+            </div>
+            <div class="score-item">
+              <span class="score-title">False Alarm Ratio (FAR)</span>
+              <span class="score-value green" id="farMetric">0.167</span>
+              <span class="score-hint">Lower is better</span>
+            </div>
+            <div class="score-item">
+              <span class="score-title">Overall Accuracy</span>
+              <span class="score-value" id="accMetric">83.3%</span>
+              <span class="score-hint">Hit + Correct Rejection</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Ground Truth vs Predicted Points Table -->
+        <div class="panel-card">
+          <div class="card-header">
+            <h3><i data-lucide="list-checks"></i> Ground Truth vs Predicted Points</h3>
+          </div>
+          <div class="backtest-table-container">
+            <table class="styled-table" id="backtestTable">
+              <thead>
+                <tr>
+                  <th>Location</th>
+                  <th>Observed</th>
+                  <th>Predicted</th>
+                  <th>Outcome</th>
+                </tr>
+              </thead>
+              <tbody id="backtestTableBody">
+                <!-- Dynamically populated -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab Content 4: ULB Drainage Network Calibration -->
+      <div class="tab-content" id="tab-editor">
+        <div class="panel-header">
+          <h2>ULB Drain Network & Calibration</h2>
+          <span class="tag-live">Human-in-the-Loop</span>
+        </div>
+        <p class="panel-desc">
+          Addresses the Indian Smart City reality where drain GIS is incomplete.
+          Infers missing conduits from road topology & DEM, and allows ULB engineers
+          to upgrade bottleneck pipes to eliminate street surcharge!
+        </p>
+
+        <!-- Bottleneck Inspector Card -->
+        <div class="panel-card">
+          <div class="card-header">
+            <h3><i data-lucide="git-commit"></i> Drain Conduit Inspector</h3>
+            <span class="badge-sub">Click any pipe on map</span>
+          </div>
+          <div class="pipe-editor-form">
+            <div class="form-group">
+              <label for="selectedPipeSelect">Select Conduit / Pipe:</label>
+              <select id="selectedPipeSelect" class="styled-select">
+                <!-- Dynamically populated -->
+              </select>
+            </div>
+
+            <div class="pipe-details-card" id="pipeDetailsCard">
+              <div class="detail-row">
+                <span>From Manhole:</span> <strong id="pipeFrom">MH-07</strong>
+              </div>
+              <div class="detail-row">
+                <span>To Manhole:</span> <strong id="pipeTo">MH-08 (Culvert)</strong>
+              </div>
+              <div class="detail-row">
+                <span>Current Capacity:</span> <strong id="pipeCap">0.42 m³/s</strong>
+              </div>
+              <div class="detail-row">
+                <span>Capacity Utilization:</span> <strong id="pipeUtil" class="text-red">145% (Choked)</strong>
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-top: 12px;">
+              <label for="newPipeDiameter">Calibrate / Upgrade Diameter (mm):</label>
+              <div class="slider-input-combo">
+                <input type="range" id="newPipeDiameter" min="400" max="1800" step="50" value="500">
+                <span class="slider-val" id="diameterValDisplay">500 mm</span>
+              </div>
+            </div>
+
+            <button id="applyCalibrationBtn" class="btn btn-warning btn-block">
+              <i data-lucide="check"></i> Apply Calibration & Recalculate
+            </button>
+          </div>
+        </div>
+
+        <!-- Network Inferred Stats -->
+        <div class="panel-card">
+          <div class="card-header">
+            <h3><i data-lucide="info"></i> Data-Sparse Inferred Links</h3>
+          </div>
+          <div class="inferred-stats">
+            <div class="inf-stat">
+              <span>Digitized Survey Pipes:</span> <strong>12</strong>
+            </div>
+            <div class="inf-stat">
+              <span>Auto-Inferred Pipes (DEM/Roads):</span> <strong class="text-cyan">6</strong>
+            </div>
+            <div class="inf-stat">
+              <span>Hydraulic Graph Confidence:</span> <strong class="text-green">86.4%</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- Inspection Modal for Map Clicks (Streets / Manholes) -->
+  <div id="inspectorModal" class="modal-backdrop" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="modalTitle">Street Segment Telemetry</h3>
+        <button id="closeModalBtn" class="modal-close"><i data-lucide="x"></i></button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-meta-grid" id="modalMetaGrid">
+          <!-- Dynamic meta -->
+        </div>
+        <div class="modal-chart-wrap">
+          <h4>Water Depth Profile Across 0–180 min Horizon</h4>
+          <div class="chart-container" style="height: 180px;">
+            <canvas id="modalChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  
+  <!-- Frontend Application Scripts -->
+  <script src="js/map.js"></script>
+  <script src="js/routing.js"></script>
+  <script src="js/editor.js"></script>
+  <script src="js/backtest.js"></script>
+  <script src="js/app.js"></script>
+  
+  <script>
+    // Initialize Lucide Icons
+    lucide.createIcons();
+  </script>
+</body>
+</html>
